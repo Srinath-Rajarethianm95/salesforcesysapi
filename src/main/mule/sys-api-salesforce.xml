@@ -2,7 +2,7 @@
 <mule xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
 http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd">
     <http:listener-config name="sys-api-salesforce-httpListenerConfig">
-        <http:listener-connection host="0.0.0.0" port="8081" />
+        <http:listener-connection host="0.0.0.0" port="8085" />
     </http:listener-config>
     <apikit:config name="sys-api-salesforce-config" api="resource::4ab036c8-954c-4032-9376-0547155ec356:sys-api-salesforce:1.0.0:raml:zip:sys-api-salesforce.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" />
     <salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="5ba335a7-d262-4fc1-91dc-7428eaccf843" >
@@ -128,23 +128,63 @@ output application/json
         </error-handler>
     </flow>
     <flow name="get:\accountCreation:sys-api-salesforce-config">
-        <salesforce:query doc:id="04e822ee-6093-4704-9866-f3aad47ce3b2" config-ref="Salesforce_Config">
-			<salesforce:salesforce-query ><![CDATA[SELECT Id, Name, AnnualRevenue, NumberOfEmployees, AccountEmail__c, CreatedDate, LastModifiedDate 
-FROM Account WHERE LastModifiedDate> :lastRunTime]]></salesforce:salesforce-query>
-			<salesforce:parameters ><![CDATA[#[output application/json
+		<logger level="INFO" doc:name="QueryParams" doc:id="b4ec8b9f-0a1d-4a51-b7c4-d5053511cc09" message="#[attributes.queryParams.lastModifiedDate]" />
+		<salesforce:query doc:name="Query" doc:id="2e1410d4-a5d0-4f8c-b149-931ffd86842f" config-ref="Salesforce_Config">
+			<salesforce:salesforce-query><![CDATA[SELECT Id, Name, AnnualRevenue, NumberOfEmployees, AccountEmail__c, CreatedDate, LastModifiedDate 
+FROM Account WHERE LastModifiedDate> :LastModifiedDate]]></salesforce:salesforce-query>
+			<salesforce:parameters><![CDATA[#[output application/json
 ---
 {
-	lastRunTime : attributes.queryParams.lastRun default now() as DateTime as String {format:"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"}
+	LastModifiedDate : attributes.queryParams.lastModifiedDate default 
+	(now() >> "UTC") as DateTime as String {format:"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"}
 }]]]></salesforce:parameters>
 		</salesforce:query>
-		<ee:transform doc:name="Transform Message">
-            <ee:message>
-                <ee:set-payload><![CDATA[%dw 2.0
+		<ee:transform doc:name="Transform Message" doc:id="081d875c-56db-4b67-a576-50bf6297033c" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
 output application/json
 ---
 payload]]></ee:set-payload>
-            </ee:message>
-        </ee:transform>
-		<logger level="INFO" doc:name="Logger" doc:id="54c6d225-4bcc-4673-bda5-73511c90e13a" message="#[payload]"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="payloadFromSalesforce" doc:id="b29a0394-3021-433a-af80-7ac03f09284f" message="#[payload]" />
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="fff4249f-c0a2-44dc-8222-62f043ffed13" type="SALESFORCE:COMMUNICATION, SALESFORCE:CONNECTIVITY, SALESFORCE:INSUFFICIENT_PERMISSIONS, SALESFORCE:NOT_FOUND">
+				<ee:transform doc:name="Transform Message" doc:id="178f01c9-7197-4538-9df8-1d7dfcc16f24" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Bad request"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+						<ee:set-variable variableName="httpStatus" ><![CDATA[400]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="efafd4e5-f6e4-488d-a1eb-09b5b4d25c30" type="SALESFORCE:INVALID_INPUT, SALESFORCE:INVALID_RESPONSE, SALESFORCE:MUTUAL_AUTHENTICATION_FAILED, SALESFORCE:OPERATION_NOT_SUPPORTED, EXPRESSION">
+				<ee:transform doc:name="Transform Message" doc:id="0aea36e3-4fbe-4848-94fc-b81a40db8eea" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Internal Server Error"}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="dfac1254-bea9-41ed-a68e-8831dc2d2b4b" type="SALESFORCE:LIMIT_EXCEEDED, SALESFORCE:RETRY_EXHAUSTED, SALESFORCE:TIMEOUT, SALESFORCE:UNAVAILABLE, STREAM_MAXIMUM_SIZE_EXCEEDED">
+				<ee:transform doc:name="Transform Message" doc:id="64716e6e-83ee-4706-a017-8983846322c3" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Gateway Timeout"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+						<ee:set-variable variableName="httpStatus" ><![CDATA[504]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+		</error-handler>
     </flow>
 </mule>
